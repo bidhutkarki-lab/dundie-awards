@@ -11,8 +11,8 @@ public class Activity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private long id;
 
-    @Column(name = "occured_at")
-    private LocalDateTime occuredAt;
+    @Column(name = "occurred_at")
+    private LocalDateTime occurredAt;
 
     @Column(name = "event")
     private String event;
@@ -23,12 +23,12 @@ public class Activity {
 
     public Activity(LocalDateTime localDateTime, String event) {
         super();
-        this.occuredAt = localDateTime;
+        this.occurredAt = localDateTime;
         this.event = event;
     }
 
-    public LocalDateTime getOccuredAt() {
-        return occuredAt;
+    public LocalDateTime getOccurredAt() {
+        return occurredAt;
     }
 
     public String getEvent() {
