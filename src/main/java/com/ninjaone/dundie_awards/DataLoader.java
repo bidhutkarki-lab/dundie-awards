@@ -4,19 +4,16 @@ import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
 @Component
+@RequiredArgsConstructor
 public class DataLoader implements CommandLineRunner {
 
     private final EmployeeRepository employeeRepository;
     private final OrganizationRepository organizationRepository;
-
-    public DataLoader(EmployeeRepository employeeRepository, OrganizationRepository organizationRepository) {
-        this.employeeRepository = employeeRepository;
-        this.organizationRepository = organizationRepository;
-    }
 
     @Override
     public void run(String... args) {
