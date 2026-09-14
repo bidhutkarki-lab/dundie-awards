@@ -1,6 +1,8 @@
 springdoc:
   api-docs:
     path: /openapi
+  swagger-ui:
+    path: /swagger-ui.html
 server:
   port: 3000
 
@@ -12,7 +14,7 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
   thymeleaf: # Thymeleaf
     cache: false
     mode: HTML
@@ -23,3 +25,12 @@ spring:
       static-locations: classpath:/static/
       cache:
         period: 0
+
+logging:
+  level:
+    root: INFO
+    com.ninjaone.dundie_awards: ${APP_LOG_LEVEL:DEBUG}
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
