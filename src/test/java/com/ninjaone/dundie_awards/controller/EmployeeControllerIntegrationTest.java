@@ -9,10 +9,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
+
 import com.ninjaone.dundie_awards.TestcontainersConfiguration;
 import com.ninjaone.dundie_awards.dto.EmployeeRequest;
+import com.ninjaone.dundie_awards.model.Activity;
 import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
+import com.ninjaone.dundie_awards.repository.ActivityRepository;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,33 +46,96 @@ class EmployeeControllerIntegrationTest {
     @Autowired
     private OrganizationRepository organizationRepository;
 
+    @Autowired
+    private ActivityRepository activityRepository;
+
     private Organization organization;
 
     @BeforeEach
     void resetData() {
+        activityRepository.deleteAll();
         employeeRepository.deleteAll();
         organizationRepository.deleteAll();
         organization = organizationRepository.save(new Organization("Dunder Mifflin"));
     }
 
     @Test
-    void getAllEmployeesReturnsStoredEmployees() throws Exception {
+    void getEmployeesReturnsStoredEmployees() throws Exception {
         employeeRepository.save(new Employee("Michael", "Scott", organization));
         employeeRepository.save(new Employee("Dwight", "Schrute", organization));
 
         mockMvc.perform(get("/employees"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].firstName").value("Michael"))
-                .andExpect(jsonPath("$[0].organizationName").value("Dunder Mifflin"))
-                .andExpect(jsonPath("$[1].firstName").value("Dwight"));
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.content[0].firstName").value("Michael"))
+                .andExpect(jsonPath("$.content[0].organizationName").value("Dunder Mifflin"))
+                .andExpect(jsonPath("$.content[1].firstName").value("Dwight"))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(10));
     }
 
     @Test
-    void getAllEmployeesReturnsEmptyArrayWhenNoneExist() throws Exception {
+    void getEmployeesReturnsEmptyPageWhenNoneExist() throws Exception {
         mockMvc.perform(get("/employees"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(0)));
+                .andExpect(jsonPath("$.content", hasSize(0)))
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.totalPages").value(0))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(true));
+    }
+
+    @Test
+    void getEmployeesPagesInStableIdOrder() throws Exception {
+        for (int i = 1; i <= 5; i++) {
+            employeeRepository.save(new Employee("First" + i, "Last" + i, organization));
+        }
+
+        mockMvc.perform(get("/employees").param("page", "0").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.content[0].firstName").value("First1"))
+                .andExpect(jsonPath("$.content[1].firstName").value("First2"))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(false));
+
+        mockMvc.perform(get("/employees").param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].firstName").value("First3"))
+                .andExpect(jsonPath("$.content[1].firstName").value("First4"));
+
+        mockMvc.perform(get("/employees").param("page", "2").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].firstName").value("First5"))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.last").value(true));
+    }
+
+    @Test
+    void getEmployeesReturnsEmptyContentBeyondLastPage() throws Exception {
+        employeeRepository.save(new Employee("Michael", "Scott", organization));
+
+        mockMvc.perform(get("/employees").param("page", "5").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(0)))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void getEmployeesRejectsInvalidPagingParams() throws Exception {
+        mockMvc.perform(get("/employees").param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("page: must be greater than or equal to 0"));
+
+        mockMvc.perform(get("/employees").param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("size: must be greater than or equal to 1"));
+
+        mockMvc.perform(get("/employees").param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("size: must be less than or equal to 100"));
     }
 
     @Test
@@ -89,6 +156,8 @@ class EmployeeControllerIntegrationTest {
                     assertThat(saved.getFirstName()).isEqualTo("Michael");
                     assertThat(saved.getOrganization().getId()).isEqualTo(organization.getId());
                 });
+        long createdId = employeeRepository.findAll().get(0).getId();
+        assertThat(activityEvents()).containsExactly("employee.created id=" + createdId);
     }
 
     @Test
@@ -103,6 +172,7 @@ class EmployeeControllerIntegrationTest {
                 .andExpect(jsonPath("$.lastName").exists());
 
         assertThat(employeeRepository.count()).isZero();
+        assertThat(activityEvents()).isEmpty();
     }
 
     @Test
@@ -127,6 +197,7 @@ class EmployeeControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value("Organization not found: 9999"));
 
         assertThat(employeeRepository.count()).isZero();
+        assertThat(activityEvents()).isEmpty();
     }
 
     @Test
@@ -163,6 +234,7 @@ class EmployeeControllerIntegrationTest {
         Employee reloaded = employeeRepository.findById(saved.getId()).orElseThrow();
         assertThat(reloaded.getLastName()).isEqualTo("Scarn");
         assertThat(reloaded.getOrganization().getId()).isEqualTo(newOrganization.getId());
+        assertThat(activityEvents()).containsExactly("employee.updated id=" + saved.getId());
     }
 
     @Test
@@ -188,6 +260,7 @@ class EmployeeControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value("Organization not found: 9999"));
 
         assertThat(employeeRepository.findById(saved.getId()).orElseThrow().getLastName()).isEqualTo("Scott");
+        assertThat(activityEvents()).isEmpty();
     }
 
     @Test
@@ -199,6 +272,7 @@ class EmployeeControllerIntegrationTest {
                 .andExpect(jsonPath("$.deleted").value(true));
 
         assertThat(employeeRepository.findById(saved.getId())).isEmpty();
+        assertThat(activityEvents()).containsExactly("employee.deleted id=" + saved.getId());
     }
 
     @Test
@@ -206,5 +280,11 @@ class EmployeeControllerIntegrationTest {
         mockMvc.perform(delete("/employees/{id}", 9999L))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Employee not found: 9999"));
+
+        assertThat(activityEvents()).isEmpty();
+    }
+
+    private List<String> activityEvents() {
+        return activityRepository.findAll().stream().map(Activity::getEvent).toList();
     }
 }

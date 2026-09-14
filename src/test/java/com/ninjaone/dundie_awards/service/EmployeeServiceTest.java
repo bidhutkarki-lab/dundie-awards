@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,8 +17,9 @@ import java.util.stream.Stream;
 
 import com.ninjaone.dundie_awards.dto.EmployeeRequest;
 import com.ninjaone.dundie_awards.dto.EmployeeResponse;
+import com.ninjaone.dundie_awards.dto.PageResponse;
 import com.ninjaone.dundie_awards.exception.EmployeeNotFoundException;
-import com.ninjaone.dundie_awards.exception.OrganizationNotFoundException;
+import com.ninjaone.dundie_awards.exception.InvalidOrganizationReferenceException;
 import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
@@ -32,6 +34,10 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 @ExtendWith(MockitoExtension.class)
 class EmployeeServiceTest {
@@ -46,32 +52,64 @@ class EmployeeServiceTest {
     @Mock
     private OrganizationRepository organizationRepository;
 
+    @Mock
+    private ActivityService activityService;
+
     @InjectMocks
     private EmployeeService employeeService;
 
     @Captor
     private ArgumentCaptor<Employee> employeeCaptor;
 
+    @Captor
+    private ArgumentCaptor<Pageable> pageableCaptor;
+
     @Test
-    void getAllEmployeesReturnsMappedResponses() {
-        when(employeeRepository.findAll()).thenReturn(List.of(
-                employee(EMPLOYEE_ID, "Michael", "Scott"),
-                employee(2L, "Dwight", "Schrute")));
+    void getEmployeesRequestsStableIdOrder() {
+        when(employeeRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
-        List<EmployeeResponse> responses = employeeService.getAllEmployees();
+        employeeService.getEmployees(2, 15);
 
-        assertThat(responses)
+        verify(employeeRepository).findAll(pageableCaptor.capture());
+        Pageable pageable = pageableCaptor.getValue();
+        assertThat(pageable.getPageNumber()).isEqualTo(2);
+        assertThat(pageable.getPageSize()).isEqualTo(15);
+        assertThat(pageable.getSort()).containsExactly(Sort.Order.asc("id"));
+    }
+
+    @Test
+    void getEmployeesMapsContentAndPageMetadata() {
+        when(employeeRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(
+                List.of(employee(EMPLOYEE_ID, "Michael", "Scott"), employee(2L, "Dwight", "Schrute")),
+                PageRequest.of(1, 2),
+                6));
+
+        PageResponse<EmployeeResponse> response = employeeService.getEmployees(1, 2);
+
+        assertThat(response.content())
                 .extracting(EmployeeResponse::id, EmployeeResponse::firstName, EmployeeResponse::organizationName)
                 .containsExactly(
                         tuple(EMPLOYEE_ID, "Michael", "Dunder Mifflin"),
                         tuple(2L, "Dwight", "Dunder Mifflin"));
+        assertThat(response.page()).isEqualTo(1);
+        assertThat(response.size()).isEqualTo(2);
+        assertThat(response.totalElements()).isEqualTo(6);
+        assertThat(response.totalPages()).isEqualTo(3);
+        assertThat(response.first()).isFalse();
+        assertThat(response.last()).isFalse();
     }
 
     @Test
-    void getAllEmployeesReturnsEmptyListWhenNoneExist() {
-        when(employeeRepository.findAll()).thenReturn(List.of());
+    void getEmployeesReturnsEmptyPageWhenNoneExist() {
+        when(employeeRepository.findAll(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
 
-        assertThat(employeeService.getAllEmployees()).isEmpty();
+        PageResponse<EmployeeResponse> response = employeeService.getEmployees(0, 20);
+
+        assertThat(response.content()).isEmpty();
+        assertThat(response.totalElements()).isZero();
+        assertThat(response.first()).isTrue();
+        assertThat(response.last()).isTrue();
     }
 
     @ParameterizedTest(name = "maps employee with {0}")
@@ -97,12 +135,12 @@ class EmployeeServiceTest {
         assertThat(saved.getLastName()).isEqualTo("Scott");
         assertThat(saved.getOrganization()).isSameAs(organization);
         assertThat(response.id()).isEqualTo(EMPLOYEE_ID);
+        verify(activityService).record("employee.created id=" + EMPLOYEE_ID);
     }
 
     @Test
     void updateEmployeeAppliesRequestToExistingEmployee() {
-        Organization newOrganization = new Organization("Sabre");
-        newOrganization.setId(20L);
+        Organization newOrganization = Organization.builder().id(20L).name("Sabre").build();
         Employee existing = employee(EMPLOYEE_ID, "Michael", "Scott");
         when(organizationRepository.findById(20L)).thenReturn(Optional.of(newOrganization));
         when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(existing));
@@ -116,6 +154,7 @@ class EmployeeServiceTest {
         assertThat(existing.getOrganization()).isSameAs(newOrganization);
         assertThat(response.lastName()).isEqualTo("Scarn");
         assertThat(response.organizationName()).isEqualTo("Sabre");
+        verify(activityService).record("employee.updated id=" + EMPLOYEE_ID);
     }
 
     @Test
@@ -126,6 +165,7 @@ class EmployeeServiceTest {
         employeeService.deleteEmployee(EMPLOYEE_ID);
 
         verify(employeeRepository).delete(existing);
+        verify(activityService).record("employee.deleted id=" + EMPLOYEE_ID);
     }
 
     @ParameterizedTest(name = "employee missing: {0}")
@@ -139,6 +179,7 @@ class EmployeeServiceTest {
                 .isInstanceOf(EmployeeNotFoundException.class);
         verify(employeeRepository, never()).save(any());
         verify(employeeRepository, never()).delete(any());
+        verify(activityService, never()).record(anyString());
     }
 
     @ParameterizedTest(name = "organization missing: {0}")
@@ -147,30 +188,56 @@ class EmployeeServiceTest {
         when(organizationRepository.findById(ORGANIZATION_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> operation.accept(employeeService))
-                .isInstanceOf(OrganizationNotFoundException.class);
+                .isInstanceOf(InvalidOrganizationReferenceException.class);
         verify(employeeRepository, never()).save(any());
+        verify(activityService, never()).record(anyString());
     }
 
     private static Stream<Arguments> employeeMappingCases() {
-        Employee decorated = employee(EMPLOYEE_ID, "Michael", "Scott");
-        decorated.setDundieAwards(3);
+        Employee decorated = Employee.builder()
+                .id(EMPLOYEE_ID)
+                .firstName("Michael")
+                .lastName("Scott")
+                .dundieAwards(3)
+                .organization(organization())
+                .build();
 
-        Employee unassigned = new Employee("Creed", "Bratton", null);
-        unassigned.setId(EMPLOYEE_ID);
+        Employee unassigned = Employee.builder()
+                .id(EMPLOYEE_ID)
+                .firstName("Creed")
+                .lastName("Bratton")
+                .build();
 
         return Stream.of(
                 Arguments.of(
                         "organization and awards present",
                         decorated,
-                        new EmployeeResponse(EMPLOYEE_ID, "Michael", "Scott", 3, ORGANIZATION_ID, "Dunder Mifflin")),
+                        EmployeeResponse.builder()
+                                .id(EMPLOYEE_ID)
+                                .firstName("Michael")
+                                .lastName("Scott")
+                                .dundieAwards(3)
+                                .organizationId(ORGANIZATION_ID)
+                                .organizationName("Dunder Mifflin")
+                                .build()),
                 Arguments.of(
                         "no awards yet",
                         employee(EMPLOYEE_ID, "Pam", "Beesly"),
-                        new EmployeeResponse(EMPLOYEE_ID, "Pam", "Beesly", null, ORGANIZATION_ID, "Dunder Mifflin")),
+                        EmployeeResponse.builder()
+                                .id(EMPLOYEE_ID)
+                                .firstName("Pam")
+                                .lastName("Beesly")
+                                .organizationId(ORGANIZATION_ID)
+                                .organizationName("Dunder Mifflin")
+                                .build()),
                 Arguments.of(
                         "no organization",
                         unassigned,
-                        new EmployeeResponse(EMPLOYEE_ID, "Creed", "Bratton", null, null, null)));
+                        EmployeeResponse.builder()
+                                .id(EMPLOYEE_ID)
+                                .firstName("Creed")
+                                .lastName("Bratton")
+                                .build()));
     }
 
     private static Stream<Arguments> employeeLookupOperations() {
@@ -191,14 +258,15 @@ class EmployeeServiceTest {
     }
 
     private static Organization organization() {
-        Organization organization = new Organization("Dunder Mifflin");
-        organization.setId(ORGANIZATION_ID);
-        return organization;
+        return Organization.builder().id(ORGANIZATION_ID).name("Dunder Mifflin").build();
     }
 
     private static Employee employee(long id, String firstName, String lastName) {
-        Employee employee = new Employee(firstName, lastName, organization());
-        employee.setId(id);
-        return employee;
+        return Employee.builder()
+                .id(id)
+                .firstName(firstName)
+                .lastName(lastName)
+                .organization(organization())
+                .build();
     }
 }
