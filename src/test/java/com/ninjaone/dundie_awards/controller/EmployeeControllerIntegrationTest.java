@@ -17,6 +17,7 @@ import com.ninjaone.dundie_awards.model.Activity;
 import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.ActivityRepository;
+import com.ninjaone.dundie_awards.repository.DundieAwardRepository;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -49,13 +51,21 @@ class EmployeeControllerIntegrationTest {
     @Autowired
     private ActivityRepository activityRepository;
 
+    @Autowired
+    private DundieAwardRepository dundieAwardRepository;
+
+    @Autowired
+    private CacheManager cacheManager;
+
     private Organization organization;
 
     @BeforeEach
     void resetData() {
+        dundieAwardRepository.deleteAll();
         activityRepository.deleteAll();
         employeeRepository.deleteAll();
         organizationRepository.deleteAll();
+        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
         organization = organizationRepository.save(new Organization("Dunder Mifflin"));
     }
 
@@ -264,15 +274,39 @@ class EmployeeControllerIntegrationTest {
     }
 
     @Test
-    void deleteEmployeeRemovesEmployee() throws Exception {
+    void deleteEmployeeSoftDeletesEmployee() throws Exception {
         Employee saved = employeeRepository.save(new Employee("Michael", "Scott", organization));
 
         mockMvc.perform(delete("/employees/{id}", saved.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deleted").value(true));
 
-        assertThat(employeeRepository.findById(saved.getId())).isEmpty();
+        Employee reloaded = employeeRepository.findById(saved.getId()).orElseThrow();
+        assertThat(reloaded.getDeletedAt()).isNotNull();
         assertThat(activityEvents()).containsExactly("employee.deleted id=" + saved.getId());
+    }
+
+    @Test
+    void softDeletedEmployeeIsHiddenFromReads() throws Exception {
+        Employee saved = employeeRepository.save(new Employee("Michael", "Scott", organization));
+        mockMvc.perform(delete("/employees/{id}", saved.getId())).andExpect(status().isOk());
+
+        mockMvc.perform(get("/employees"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(0)))
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        mockMvc.perform(get("/employees/{id}", saved.getId()))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(delete("/employees/{id}", saved.getId()))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(put("/employees/{id}", saved.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new EmployeeRequest("Michael", "Scarn", organization.getId()))))
+                .andExpect(status().isNotFound());
     }
 
     @Test

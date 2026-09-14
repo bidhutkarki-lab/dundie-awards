@@ -1,0 +1,105 @@
+package com.ninjaone.dundie_awards.service;
+
+import java.time.LocalDateTime;
+
+import com.ninjaone.dundie_awards.dto.DundieAwardRequest;
+import com.ninjaone.dundie_awards.dto.DundieAwardResponse;
+import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.exception.CrossOrganizationAwardException;
+import com.ninjaone.dundie_awards.exception.DundieAwardNotFoundException;
+import com.ninjaone.dundie_awards.exception.InvalidEmployeeReferenceException;
+import com.ninjaone.dundie_awards.exception.SelfAwardException;
+import com.ninjaone.dundie_awards.model.DundieAward;
+import com.ninjaone.dundie_awards.model.Employee;
+import com.ninjaone.dundie_awards.model.Organization;
+import com.ninjaone.dundie_awards.repository.DundieAwardRepository;
+import com.ninjaone.dundie_awards.repository.EmployeeRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class DundieAwardService {
+
+    public static final String AWARD_COUNT_CACHE = "employeeAwardCounts";
+
+    // id breaks ties so paging stays stable when timestamps collide
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("awardedAt"), Sort.Order.desc("id"));
+
+    private final DundieAwardRepository dundieAwardRepository;
+    private final EmployeeRepository employeeRepository;
+    private final ActivityService activityService;
+
+    public PageResponse<DundieAwardResponse> getAwards(int page, int size) {
+        log.debug("Fetching dundie awards page={} size={}", page, size);
+        PageResponse<DundieAwardResponse> awards = PageResponse.from(
+                dundieAwardRepository.findAll(PageRequest.of(page, size, NEWEST_FIRST))
+                        .map(DundieAwardResponse::from));
+        log.debug("Fetched {} of {} dundie awards", awards.content().size(), awards.totalElements());
+        return awards;
+    }
+
+    public DundieAwardResponse getAward(Long id) {
+        log.debug("Fetching dundie award id={}", id);
+        return DundieAwardResponse.from(dundieAwardRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Dundie award not found id={}", id);
+                    return new DundieAwardNotFoundException(id);
+                }));
+    }
+
+    @Cacheable(cacheNames = AWARD_COUNT_CACHE, key = "#employeeId")
+    public long countAwards(Long employeeId) {
+        long count = dundieAwardRepository.countByRecipientId(employeeId);
+        log.debug("Counted {} dundie awards for employeeId={}", count, employeeId);
+        return count;
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = AWARD_COUNT_CACHE, key = "#request.recipientId()")
+    public DundieAwardResponse giveAward(DundieAwardRequest request) {
+        if (request.recipientId().equals(request.giverId())) {
+            log.warn("Rejecting self award employeeId={}", request.giverId());
+            throw new SelfAwardException(request.giverId());
+        }
+        Employee recipient = findEmployee(request.recipientId());
+        Employee giver = findEmployee(request.giverId());
+        Organization organization = sharedOrganization(recipient, giver);
+
+        DundieAward award = dundieAwardRepository.save(
+                new DundieAward(recipient, giver, organization, LocalDateTime.now()));
+
+        activityService.record("dundie_award.given recipientId=" + recipient.getId()
+                + " giverId=" + giver.getId());
+        log.info("Gave dundie award id={} recipientId={} giverId={} organizationId={}",
+                award.getId(), recipient.getId(), giver.getId(), organization.getId());
+        return DundieAwardResponse.from(award);
+    }
+
+    private Organization sharedOrganization(Employee recipient, Employee giver) {
+        Organization organization = recipient.getOrganization();
+        Organization giverOrganization = giver.getOrganization();
+        if (organization == null || giverOrganization == null
+                || organization.getId() != giverOrganization.getId()) {
+            log.warn("Rejecting cross-organization award recipientId={} giverId={}",
+                    recipient.getId(), giver.getId());
+            throw new CrossOrganizationAwardException(recipient.getId(), giver.getId());
+        }
+        return organization;
+    }
+
+    private Employee findEmployee(Long id) {
+        return employeeRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> {
+                    log.warn("Employee not found id={}", id);
+                    return new InvalidEmployeeReferenceException(id);
+                });
+    }
+}

@@ -17,6 +17,7 @@ import com.ninjaone.dundie_awards.model.Activity;
 import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.ActivityRepository;
+import com.ninjaone.dundie_awards.repository.DundieAwardRepository;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,8 +50,12 @@ class OrganizationControllerIntegrationTest {
     @Autowired
     private ActivityRepository activityRepository;
 
+    @Autowired
+    private DundieAwardRepository dundieAwardRepository;
+
     @BeforeEach
     void resetData() {
+        dundieAwardRepository.deleteAll();
         activityRepository.deleteAll();
         employeeRepository.deleteAll();
         organizationRepository.deleteAll();

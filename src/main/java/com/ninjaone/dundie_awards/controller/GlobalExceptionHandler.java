@@ -4,10 +4,14 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.ninjaone.dundie_awards.exception.CrossOrganizationAwardException;
+import com.ninjaone.dundie_awards.exception.DundieAwardNotFoundException;
 import com.ninjaone.dundie_awards.exception.EmployeeNotFoundException;
+import com.ninjaone.dundie_awards.exception.InvalidEmployeeReferenceException;
 import com.ninjaone.dundie_awards.exception.InvalidOrganizationReferenceException;
 import com.ninjaone.dundie_awards.exception.OrganizationHasEmployeesException;
 import com.ninjaone.dundie_awards.exception.OrganizationNotFoundException;
+import com.ninjaone.dundie_awards.exception.SelfAwardException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +58,32 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleOrganizationNotFound(OrganizationNotFoundException exception) {
         log.warn("Returning 404: {}", exception.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", exception.getMessage()));
+    }
+
+    @ExceptionHandler(DundieAwardNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleDundieAwardNotFound(DundieAwardNotFoundException exception) {
+        log.warn("Returning 404: {}", exception.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", exception.getMessage()));
+    }
+
+    @ExceptionHandler(CrossOrganizationAwardException.class)
+    public ResponseEntity<Map<String, String>> handleCrossOrganizationAward(
+            CrossOrganizationAwardException exception) {
+        log.warn("Returning 400: {}", exception.getMessage());
+        return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+    }
+
+    @ExceptionHandler(SelfAwardException.class)
+    public ResponseEntity<Map<String, String>> handleSelfAward(SelfAwardException exception) {
+        log.warn("Returning 400: {}", exception.getMessage());
+        return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidEmployeeReferenceException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidEmployeeReference(
+            InvalidEmployeeReferenceException exception) {
+        log.warn("Returning 400: {}", exception.getMessage());
+        return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
     }
 
     @ExceptionHandler(InvalidOrganizationReferenceException.class)
