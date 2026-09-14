@@ -1,17 +1,18 @@
 package com.ninjaone.dundie_awards.service;
 
-import java.util.List;
-
 import com.ninjaone.dundie_awards.dto.EmployeeRequest;
 import com.ninjaone.dundie_awards.dto.EmployeeResponse;
+import com.ninjaone.dundie_awards.dto.PageResponse;
 import com.ninjaone.dundie_awards.exception.EmployeeNotFoundException;
-import com.ninjaone.dundie_awards.exception.OrganizationNotFoundException;
+import com.ninjaone.dundie_awards.exception.InvalidOrganizationReferenceException;
 import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,15 +21,18 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class EmployeeService {
 
+    // paging over an unordered result set can repeat or skip rows, so the order is fixed here
+    private static final Sort BY_ID = Sort.by(Sort.Order.asc("id"));
+
     private final EmployeeRepository employeeRepository;
     private final OrganizationRepository organizationRepository;
+    private final ActivityService activityService;
 
-    public List<EmployeeResponse> getAllEmployees() {
-        log.debug("Fetching all employees");
-        List<EmployeeResponse> employees = employeeRepository.findAll().stream()
-                .map(EmployeeResponse::from)
-                .toList();
-        log.debug("Fetched {} employees", employees.size());
+    public PageResponse<EmployeeResponse> getEmployees(int page, int size) {
+        log.debug("Fetching employees page={} size={}", page, size);
+        PageResponse<EmployeeResponse> employees = PageResponse.from(
+                employeeRepository.findAll(PageRequest.of(page, size, BY_ID)).map(EmployeeResponse::from));
+        log.debug("Fetched {} of {} employees", employees.content().size(), employees.totalElements());
         return employees;
     }
 
@@ -37,11 +41,13 @@ public class EmployeeService {
         return EmployeeResponse.from(findEmployee(id));
     }
 
+    @Transactional
     public EmployeeResponse createEmployee(EmployeeRequest request) {
         log.debug("Creating employee for organizationId={}", request.organizationId());
         Organization organization = findOrganization(request.organizationId());
         Employee employee = new Employee(request.firstName(), request.lastName(), organization);
         EmployeeResponse saved = EmployeeResponse.from(employeeRepository.save(employee));
+        activityService.record("employee.created id=" + saved.id());
         log.info("Created employee id={} organizationId={}", saved.id(), request.organizationId());
         return saved;
     }
@@ -54,12 +60,15 @@ public class EmployeeService {
         employee.setLastName(request.lastName());
         employee.setOrganization(organization);
         EmployeeResponse saved = EmployeeResponse.from(employeeRepository.save(employee));
+        activityService.record("employee.updated id=" + id);
         log.info("Updated employee id={} organizationId={}", id, request.organizationId());
         return saved;
     }
 
+    @Transactional
     public void deleteEmployee(Long id) {
         employeeRepository.delete(findEmployee(id));
+        activityService.record("employee.deleted id=" + id);
         log.info("Deleted employee id={}", id);
     }
 
@@ -75,7 +84,7 @@ public class EmployeeService {
         return organizationRepository.findById(id)
                 .orElseThrow(() -> {
                     log.warn("Organization not found id={}", id);
-                    return new OrganizationNotFoundException(id);
+                    return new InvalidOrganizationReferenceException(id);
                 });
     }
 }

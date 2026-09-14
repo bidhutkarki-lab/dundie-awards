@@ -2,15 +2,14 @@ package com.ninjaone.dundie_awards.controller;
 
 import java.util.Map;
 
-import com.ninjaone.dundie_awards.dto.EmployeeRequest;
-import com.ninjaone.dundie_awards.dto.EmployeeResponse;
+import com.ninjaone.dundie_awards.dto.OrganizationRequest;
+import com.ninjaone.dundie_awards.dto.OrganizationResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
-import com.ninjaone.dundie_awards.service.EmployeeService;
+import com.ninjaone.dundie_awards.service.OrganizationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,39 +23,39 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/employees")
+@RequestMapping("/organizations")
 @RequiredArgsConstructor
 @Validated
-public class EmployeeController {
+public class OrganizationController {
 
-    private final EmployeeService employeeService;
+    private final OrganizationService organizationService;
 
     @GetMapping
-    public PageResponse<EmployeeResponse> getEmployees(
+    public PageResponse<OrganizationResponse> getOrganizations(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size) {
-        return employeeService.getEmployees(page, size);
+        return organizationService.getOrganizations(page, size);
     }
 
     @PostMapping
-    public ResponseEntity<EmployeeResponse> createEmployee(@Valid @RequestBody EmployeeRequest request) {
-        return ResponseEntity.ok(employeeService.createEmployee(request));
+    public ResponseEntity<OrganizationResponse> createOrganization(@Valid @RequestBody OrganizationRequest request) {
+        return ResponseEntity.ok(organizationService.createOrganization(request));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<EmployeeResponse> getEmployeeById(@PathVariable Long id) {
-        return ResponseEntity.ok(employeeService.getEmployee(id));
+    public ResponseEntity<OrganizationResponse> getOrganizationById(@PathVariable Long id) {
+        return ResponseEntity.ok(organizationService.getOrganization(id));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<EmployeeResponse> updateEmployee(
-            @PathVariable Long id, @Valid @RequestBody EmployeeRequest request) {
-        return ResponseEntity.ok(employeeService.updateEmployee(id, request));
+    public ResponseEntity<OrganizationResponse> updateOrganization(
+            @PathVariable Long id, @Valid @RequestBody OrganizationRequest request) {
+        return ResponseEntity.ok(organizationService.updateOrganization(id, request));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Map<String, Boolean>> deleteEmployee(@PathVariable Long id) {
-        employeeService.deleteEmployee(id);
+    public ResponseEntity<Map<String, Boolean>> deleteOrganization(@PathVariable Long id) {
+        organizationService.deleteOrganization(id);
         return ResponseEntity.ok(Map.of("deleted", Boolean.TRUE));
     }
 }

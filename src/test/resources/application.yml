@@ -4,6 +4,12 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+  # mirrors the main config: templates live under static/, not the templates/ default
+  thymeleaf:
+    cache: false
+    mode: HTML
+    encoding: UTF-8
+    prefix: classpath:/static/
 
 logging:
   level:
