@@ -1,6 +1,7 @@
 package com.ninjaone.dundie_awards.model;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -26,11 +27,11 @@ public class Employee {
     @Column(name = "last_name")
     private String lastName;
 
-    @Column(name = "dundie_awards")
-    private Integer dundieAwards;
-
     @ManyToOne
     private Organization organization;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 
     public Employee(String firstName, String lastName, Organization organization) {
         this.firstName = firstName;

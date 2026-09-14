@@ -9,17 +9,17 @@ public record EmployeeResponse(
         long id,
         String firstName,
         String lastName,
-        Integer dundieAwards,
+        long dundieAwards,
         Long organizationId,
         String organizationName) {
 
-    public static EmployeeResponse from(Employee employee) {
+    public static EmployeeResponse from(Employee employee, long dundieAwards) {
         Organization organization = employee.getOrganization();
         return EmployeeResponse.builder()
                 .id(employee.getId())
                 .firstName(employee.getFirstName())
                 .lastName(employee.getLastName())
-                .dundieAwards(employee.getDundieAwards())
+                .dundieAwards(dundieAwards)
                 .organizationId(organization == null ? null : organization.getId())
                 .organizationName(organization == null ? null : organization.getName())
                 .build();

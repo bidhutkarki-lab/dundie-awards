@@ -55,6 +55,9 @@ class EmployeeServiceTest {
     @Mock
     private ActivityService activityService;
 
+    @Mock
+    private DundieAwardService dundieAwardService;
+
     @InjectMocks
     private EmployeeService employeeService;
 
@@ -66,11 +69,11 @@ class EmployeeServiceTest {
 
     @Test
     void getEmployeesRequestsStableIdOrder() {
-        when(employeeRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        when(employeeRepository.findAllByDeletedAtIsNull(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         employeeService.getEmployees(2, 15);
 
-        verify(employeeRepository).findAll(pageableCaptor.capture());
+        verify(employeeRepository).findAllByDeletedAtIsNull(pageableCaptor.capture());
         Pageable pageable = pageableCaptor.getValue();
         assertThat(pageable.getPageNumber()).isEqualTo(2);
         assertThat(pageable.getPageSize()).isEqualTo(15);
@@ -79,7 +82,7 @@ class EmployeeServiceTest {
 
     @Test
     void getEmployeesMapsContentAndPageMetadata() {
-        when(employeeRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(
+        when(employeeRepository.findAllByDeletedAtIsNull(any(Pageable.class))).thenReturn(new PageImpl<>(
                 List.of(employee(EMPLOYEE_ID, "Michael", "Scott"), employee(2L, "Dwight", "Schrute")),
                 PageRequest.of(1, 2),
                 6));
@@ -101,7 +104,7 @@ class EmployeeServiceTest {
 
     @Test
     void getEmployeesReturnsEmptyPageWhenNoneExist() {
-        when(employeeRepository.findAll(any(Pageable.class)))
+        when(employeeRepository.findAllByDeletedAtIsNull(any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
 
         PageResponse<EmployeeResponse> response = employeeService.getEmployees(0, 20);
@@ -114,8 +117,10 @@ class EmployeeServiceTest {
 
     @ParameterizedTest(name = "maps employee with {0}")
     @MethodSource("employeeMappingCases")
-    void getEmployeeMapsEmployeeToResponse(String caseName, Employee stored, EmployeeResponse expected) {
-        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(stored));
+    void getEmployeeMapsEmployeeToResponse(
+            String caseName, Employee stored, long awardCount, EmployeeResponse expected) {
+        when(employeeRepository.findByIdAndDeletedAtIsNull(EMPLOYEE_ID)).thenReturn(Optional.of(stored));
+        when(dundieAwardService.countAwards(EMPLOYEE_ID)).thenReturn(awardCount);
 
         assertThat(employeeService.getEmployee(EMPLOYEE_ID)).isEqualTo(expected);
     }
@@ -143,7 +148,7 @@ class EmployeeServiceTest {
         Organization newOrganization = Organization.builder().id(20L).name("Sabre").build();
         Employee existing = employee(EMPLOYEE_ID, "Michael", "Scott");
         when(organizationRepository.findById(20L)).thenReturn(Optional.of(newOrganization));
-        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(existing));
+        when(employeeRepository.findByIdAndDeletedAtIsNull(EMPLOYEE_ID)).thenReturn(Optional.of(existing));
         when(employeeRepository.save(existing)).thenReturn(existing);
 
         EmployeeResponse response =
@@ -158,13 +163,15 @@ class EmployeeServiceTest {
     }
 
     @Test
-    void deleteEmployeeRemovesExistingEmployee() {
+    void deleteEmployeeMarksExistingEmployeeAsDeleted() {
         Employee existing = employee(EMPLOYEE_ID, "Michael", "Scott");
-        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(existing));
+        when(employeeRepository.findByIdAndDeletedAtIsNull(EMPLOYEE_ID)).thenReturn(Optional.of(existing));
 
         employeeService.deleteEmployee(EMPLOYEE_ID);
 
-        verify(employeeRepository).delete(existing);
+        assertThat(existing.getDeletedAt()).isNotNull();
+        verify(employeeRepository).save(existing);
+        verify(employeeRepository, never()).delete(any());
         verify(activityService).record("employee.deleted id=" + EMPLOYEE_ID);
     }
 
@@ -173,7 +180,7 @@ class EmployeeServiceTest {
     void operationThrowsWhenEmployeeMissing(String operationName, Consumer<EmployeeService> operation) {
         // only updateEmployee resolves an organization, and it does so before looking up the employee
         lenient().when(organizationRepository.findById(ORGANIZATION_ID)).thenReturn(Optional.of(organization()));
-        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.empty());
+        when(employeeRepository.findByIdAndDeletedAtIsNull(EMPLOYEE_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> operation.accept(employeeService))
                 .isInstanceOf(EmployeeNotFoundException.class);
@@ -194,14 +201,6 @@ class EmployeeServiceTest {
     }
 
     private static Stream<Arguments> employeeMappingCases() {
-        Employee decorated = Employee.builder()
-                .id(EMPLOYEE_ID)
-                .firstName("Michael")
-                .lastName("Scott")
-                .dundieAwards(3)
-                .organization(organization())
-                .build();
-
         Employee unassigned = Employee.builder()
                 .id(EMPLOYEE_ID)
                 .firstName("Creed")
@@ -211,7 +210,8 @@ class EmployeeServiceTest {
         return Stream.of(
                 Arguments.of(
                         "organization and awards present",
-                        decorated,
+                        employee(EMPLOYEE_ID, "Michael", "Scott"),
+                        3L,
                         EmployeeResponse.builder()
                                 .id(EMPLOYEE_ID)
                                 .firstName("Michael")
@@ -223,6 +223,7 @@ class EmployeeServiceTest {
                 Arguments.of(
                         "no awards yet",
                         employee(EMPLOYEE_ID, "Pam", "Beesly"),
+                        0L,
                         EmployeeResponse.builder()
                                 .id(EMPLOYEE_ID)
                                 .firstName("Pam")
@@ -233,6 +234,7 @@ class EmployeeServiceTest {
                 Arguments.of(
                         "no organization",
                         unassigned,
+                        0L,
                         EmployeeResponse.builder()
                                 .id(EMPLOYEE_ID)
                                 .firstName("Creed")

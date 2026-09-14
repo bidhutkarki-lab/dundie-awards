@@ -36,6 +36,46 @@ environment variables.
 Tests spin up a throwaway Postgres via Testcontainers, so Docker must be running. No
 separate database setup is needed — the container is created and torn down per run.
 
+## Dundie Awards
+
+An employee can receive any number of Dundie Awards. Each award is recorded as an immutable
+row — who received it, who gave it, in which organization, and when — so the history is never
+rewritten. An employee's total is derived by counting those rows rather than stored on the
+employee, and the count is cached per employee and invalidated whenever they receive a new award.
+
+An award can only be given between two employees of the **same** organization, and nobody can
+award themselves.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/dundie-awards` | Give an award. Body: `{"recipientId": 1, "giverId": 2}` |
+| `GET` | `/dundie-awards?page=0&size=10` | List awards, newest first |
+| `GET` | `/dundie-awards/{id}` | Fetch a single award |
+
+```bash
+curl -X POST http://localhost:3000/dundie-awards \
+  -H 'Content-Type: application/json' \
+  -d '{"recipientId": 1, "giverId": 2}'
+```
+
+Rejections:
+
+| Status | When |
+| --- | --- |
+| `400` | `recipientId` or `giverId` missing from the body |
+| `400` | Either employee does not exist (or has been deleted) |
+| `400` | Giver and recipient are in different organizations, or either has no organization |
+| `400` | Giver and recipient are the same employee |
+| `404` | Unknown award id |
+
+An employee's running total is exposed as `dundieAwards` on the employee endpoints.
+
+## Deleting employees
+
+`DELETE /employees/{id}` is a soft delete: the row is kept and stamped with `deleted_at`, so
+awards given and received by that employee remain intact. A soft-deleted employee is hidden
+from every read, and can no longer give or receive awards.
+
 ## API docs
 
 With the app running, the OpenAPI schema is at <http://localhost:3000/openapi> and the

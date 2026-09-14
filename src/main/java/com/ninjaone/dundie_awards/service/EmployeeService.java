@@ -9,6 +9,7 @@ import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -26,19 +27,21 @@ public class EmployeeService {
 
     private final EmployeeRepository employeeRepository;
     private final OrganizationRepository organizationRepository;
+    private final DundieAwardService dundieAwardService;
     private final ActivityService activityService;
 
     public PageResponse<EmployeeResponse> getEmployees(int page, int size) {
         log.debug("Fetching employees page={} size={}", page, size);
         PageResponse<EmployeeResponse> employees = PageResponse.from(
-                employeeRepository.findAll(PageRequest.of(page, size, BY_ID)).map(EmployeeResponse::from));
+                employeeRepository.findAllByDeletedAtIsNull(PageRequest.of(page, size, BY_ID))
+                        .map(this::toResponse));
         log.debug("Fetched {} of {} employees", employees.content().size(), employees.totalElements());
         return employees;
     }
 
     public EmployeeResponse getEmployee(Long id) {
         log.debug("Fetching employee id={}", id);
-        return EmployeeResponse.from(findEmployee(id));
+        return toResponse(findEmployee(id));
     }
 
     @Transactional
@@ -46,7 +49,7 @@ public class EmployeeService {
         log.debug("Creating employee for organizationId={}", request.organizationId());
         Organization organization = findOrganization(request.organizationId());
         Employee employee = new Employee(request.firstName(), request.lastName(), organization);
-        EmployeeResponse saved = EmployeeResponse.from(employeeRepository.save(employee));
+        EmployeeResponse saved = toResponse(employeeRepository.save(employee));
         activityService.record("employee.created id=" + saved.id());
         log.info("Created employee id={} organizationId={}", saved.id(), request.organizationId());
         return saved;
@@ -59,7 +62,7 @@ public class EmployeeService {
         employee.setFirstName(request.firstName());
         employee.setLastName(request.lastName());
         employee.setOrganization(organization);
-        EmployeeResponse saved = EmployeeResponse.from(employeeRepository.save(employee));
+        EmployeeResponse saved = toResponse(employeeRepository.save(employee));
         activityService.record("employee.updated id=" + id);
         log.info("Updated employee id={} organizationId={}", id, request.organizationId());
         return saved;
@@ -67,13 +70,19 @@ public class EmployeeService {
 
     @Transactional
     public void deleteEmployee(Long id) {
-        employeeRepository.delete(findEmployee(id));
+        Employee employee = findEmployee(id);
+        employee.setDeletedAt(LocalDateTime.now());
+        employeeRepository.save(employee);
         activityService.record("employee.deleted id=" + id);
-        log.info("Deleted employee id={}", id);
+        log.info("Soft deleted employee id={}", id);
+    }
+
+    private EmployeeResponse toResponse(Employee employee) {
+        return EmployeeResponse.from(employee, dundieAwardService.countAwards(employee.getId()));
     }
 
     private Employee findEmployee(Long id) {
-        return employeeRepository.findById(id)
+        return employeeRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> {
                     log.warn("Employee not found id={}", id);
                     return new EmployeeNotFoundException(id);
