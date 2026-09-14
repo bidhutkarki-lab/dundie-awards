@@ -7,6 +7,7 @@ import com.ninjaone.dundie_awards.dto.EmployeeRequest;
 import com.ninjaone.dundie_awards.dto.EmployeeResponse;
 import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
+import com.ninjaone.dundie_awards.repository.ActivityRepository;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import jakarta.validation.Valid;
@@ -26,7 +27,9 @@ public class EmployeeController {
 
     private final EmployeeRepository employeeRepository;
     private final OrganizationRepository organizationRepository;
+    private final ActivityRepository activityRepository;
 
+    // get all employees
     @GetMapping("/employees")
     public List<EmployeeResponse> getAllEmployees() {
         return employeeRepository.findAll().stream()
@@ -34,6 +37,7 @@ public class EmployeeController {
                 .toList();
     }
 
+    // create employee rest api
     @PostMapping("/employees")
     public ResponseEntity<EmployeeResponse> createEmployee(@Valid @RequestBody EmployeeRequest request) {
         return organizationRepository.findById(request.organizationId())
@@ -44,6 +48,7 @@ public class EmployeeController {
                 .orElseGet(() -> ResponseEntity.badRequest().build());
     }
 
+    // get employee by id rest api
     @GetMapping("/employees/{id}")
     public ResponseEntity<EmployeeResponse> getEmployeeById(@PathVariable Long id) {
         return employeeRepository.findById(id)
@@ -51,6 +56,7 @@ public class EmployeeController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    // update employee rest api
     @PutMapping("/employees/{id}")
     public ResponseEntity<EmployeeResponse> updateEmployee(
             @PathVariable Long id, @Valid @RequestBody EmployeeRequest request) {
@@ -68,6 +74,7 @@ public class EmployeeController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    // delete employee rest api
     @DeleteMapping("/employees/{id}")
     public ResponseEntity<Map<String, Boolean>> deleteEmployee(@PathVariable Long id) {
         return employeeRepository.findById(id)
