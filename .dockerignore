@@ -1,0 +1,9 @@
+.git
+.gradle
+build
+gradle.properties
+.idea
+.vscode
+*.iml
+success.png
+README.md
