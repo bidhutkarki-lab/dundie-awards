@@ -5,10 +5,12 @@ import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
 @Component
+@Slf4j
 @RequiredArgsConstructor
 public class DataLoader implements CommandLineRunner {
 
@@ -22,6 +24,7 @@ public class DataLoader implements CommandLineRunner {
         // organizationRepository.deleteAll();
 
         if (employeeRepository.count() == 0) {
+            log.info("No employees found, seeding sample data");
             Organization organizationPikashu = new Organization("Pikashu");
             organizationRepository.save(organizationPikashu);
 
@@ -36,6 +39,10 @@ public class DataLoader implements CommandLineRunner {
             employeeRepository.save(new Employee("Dwight", "Schrute", organizationSquanchy));
             employeeRepository.save(new Employee("Jim", "Halpert", organizationSquanchy));
             employeeRepository.save(new Employee("Pam", "Beesley", organizationSquanchy));
+            log.info("Seeded {} organizations and {} employees",
+                    organizationRepository.count(), employeeRepository.count());
+        } else {
+            log.debug("Skipping seed, {} employees already present", employeeRepository.count());
         }
     }
 }
