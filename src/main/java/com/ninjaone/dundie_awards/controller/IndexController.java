@@ -2,7 +2,7 @@ package com.ninjaone.dundie_awards.controller;
 
 import com.ninjaone.dundie_awards.repository.ActivityRepository;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,13 +11,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 
 @Controller
 @RequestMapping("/")
+@RequiredArgsConstructor
 public class IndexController {
 
-    @Autowired
-    private EmployeeRepository employeeRepository;
-
-    @Autowired
-    private ActivityRepository activityRepository;
+    private final EmployeeRepository employeeRepository;
+    private final ActivityRepository activityRepository;
 
     @GetMapping()
     public String getIndex(Model model) {
