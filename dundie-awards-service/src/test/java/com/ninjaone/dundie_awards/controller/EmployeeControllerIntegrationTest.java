@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.List;
 
+import com.ninjaone.dundie_awards.SynchronousActivityConfiguration;
 import com.ninjaone.dundie_awards.TestcontainersConfiguration;
 import com.ninjaone.dundie_awards.dto.EmployeeRequest;
 import com.ninjaone.dundie_awards.model.Activity;
@@ -25,7 +26,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -33,7 +33,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, SynchronousActivityConfiguration.class})
 class EmployeeControllerIntegrationTest {
 
     @Autowired
@@ -54,9 +54,6 @@ class EmployeeControllerIntegrationTest {
     @Autowired
     private DundieAwardRepository dundieAwardRepository;
 
-    @Autowired
-    private CacheManager cacheManager;
-
     private Organization organization;
 
     @BeforeEach
@@ -65,7 +62,6 @@ class EmployeeControllerIntegrationTest {
         activityRepository.deleteAll();
         employeeRepository.deleteAll();
         organizationRepository.deleteAll();
-        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
         organization = organizationRepository.save(new Organization("Dunder Mifflin"));
     }
 

@@ -1,16 +1,19 @@
 package com.ninjaone.dundie_awards.service;
 
-import java.time.LocalDateTime;
-
+import com.ninjaone.dundie_awards.config.AsyncConfig;
 import com.ninjaone.dundie_awards.dto.ActivityResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.model.Activity;
 import com.ninjaone.dundie_awards.repository.ActivityRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Service
 @Slf4j
@@ -31,8 +34,20 @@ public class ActivityService {
         return activities;
     }
 
-    public void record(String event) {
-        activityRepository.save(new Activity(LocalDateTime.now(), event));
-        log.debug("Recorded activity: {}", event);
+    // the feed is an audit trail, not part of the business write. AFTER_COMMIT runs only after successful commit.
+    // if the transaction rolls back, this listener does not run
+    @Async(AsyncConfig.ACTIVITY_EXECUTOR)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onActivityRecorded(ActivityRecorded event) {
+        try {
+            activityRepository.save(new Activity(event.occurredAt(), event.event()));
+            log.debug("Recorded activity: {}", event.event());
+        } catch (RuntimeException exception) {
+            // The business transaction has already committed, so this failure
+            // cannot roll it back. There is no retry; the activity may be lost.
+            // Reliable processing requires an outbox written in the business
+            // transaction, plus a worker that retries failed entries.
+            log.error("Failed to record activity: {}", event.event(), exception);
+        }
     }
 }

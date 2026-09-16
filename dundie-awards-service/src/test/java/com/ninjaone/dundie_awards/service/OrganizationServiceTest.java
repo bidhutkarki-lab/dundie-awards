@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.stream.Stream;
 import com.ninjaone.dundie_awards.dto.OrganizationRequest;
 import com.ninjaone.dundie_awards.dto.OrganizationResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.exception.OrganizationHasEmployeesException;
 import com.ninjaone.dundie_awards.exception.OrganizationNotFoundException;
 import com.ninjaone.dundie_awards.model.Organization;
@@ -33,6 +35,7 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -51,7 +54,7 @@ class OrganizationServiceTest {
     private EmployeeRepository employeeRepository;
 
     @Mock
-    private ActivityService activityService;
+    private ApplicationEventPublisher events;
 
     @InjectMocks
     private OrganizationService organizationService;
@@ -61,6 +64,9 @@ class OrganizationServiceTest {
 
     @Captor
     private ArgumentCaptor<Pageable> pageableCaptor;
+
+    @Captor
+    private ArgumentCaptor<ActivityRecorded> activityCaptor;
 
     @Test
     void getOrganizationsRequestsStableIdOrder() {
@@ -130,7 +136,7 @@ class OrganizationServiceTest {
         verify(organizationRepository).save(organizationCaptor.capture());
         assertThat(organizationCaptor.getValue().getName()).isEqualTo("Dunder Mifflin");
         assertThat(response).isEqualTo(new OrganizationResponse(ORGANIZATION_ID, "Dunder Mifflin"));
-        verify(activityService).record("organization.created id=" + ORGANIZATION_ID);
+        assertActivityPublished("organization.created id=" + ORGANIZATION_ID);
     }
 
     @Test
@@ -144,7 +150,7 @@ class OrganizationServiceTest {
 
         assertThat(existing.getName()).isEqualTo("Sabre");
         assertThat(response.name()).isEqualTo("Sabre");
-        verify(activityService).record("organization.updated id=" + ORGANIZATION_ID);
+        assertActivityPublished("organization.updated id=" + ORGANIZATION_ID);
     }
 
     @Test
@@ -158,7 +164,7 @@ class OrganizationServiceTest {
         assertThat(existing.getDeletedAt()).isNotNull();
         verify(organizationRepository).save(existing);
         verify(organizationRepository, never()).delete(any());
-        verify(activityService).record("organization.deleted id=" + ORGANIZATION_ID);
+        assertActivityPublished("organization.deleted id=" + ORGANIZATION_ID);
     }
 
     @Test
@@ -172,7 +178,7 @@ class OrganizationServiceTest {
                 .hasMessage("Organization still has employees: " + ORGANIZATION_ID);
         verify(organizationRepository, never()).save(any());
         verify(organizationRepository, never()).delete(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     @ParameterizedTest(name = "organization missing: {0}")
@@ -185,7 +191,7 @@ class OrganizationServiceTest {
                 .hasMessage("Organization not found: " + ORGANIZATION_ID);
         verify(organizationRepository, never()).save(any());
         verify(organizationRepository, never()).delete(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     private static Stream<Arguments> organizationLookupOperations() {
@@ -200,6 +206,11 @@ class OrganizationServiceTest {
 
     private static Consumer<OrganizationService> asOperation(Consumer<OrganizationService> operation) {
         return operation;
+    }
+
+    private void assertActivityPublished(String event) {
+        verify(events).publishEvent(activityCaptor.capture());
+        assertThat(activityCaptor.getValue().event()).isEqualTo(event);
     }
 
     private static Organization organization(long id, String name) {

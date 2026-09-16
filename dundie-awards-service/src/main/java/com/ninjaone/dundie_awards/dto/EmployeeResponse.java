@@ -13,13 +13,13 @@ public record EmployeeResponse(
         Long organizationId,
         String organizationName) {
 
-    public static EmployeeResponse from(Employee employee, long dundieAwards) {
+    public static EmployeeResponse from(Employee employee) {
         Organization organization = employee.getOrganization();
         return EmployeeResponse.builder()
                 .id(employee.getId())
                 .firstName(employee.getFirstName())
                 .lastName(employee.getLastName())
-                .dundieAwards(dundieAwards)
+                .dundieAwards(employee.getAwardCount())
                 .organizationId(organization == null ? null : organization.getId())
                 .organizationName(organization == null ? null : organization.getName())
                 .build();

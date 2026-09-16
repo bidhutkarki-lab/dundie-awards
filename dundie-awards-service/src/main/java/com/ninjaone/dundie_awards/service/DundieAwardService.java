@@ -6,6 +6,7 @@ import com.ninjaone.dundie_awards.dto.DundieAwardRequest;
 import com.ninjaone.dundie_awards.dto.DundieAwardResponse;
 import com.ninjaone.dundie_awards.dto.LeaderboardEntry;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.exception.CrossOrganizationAwardException;
 import com.ninjaone.dundie_awards.exception.DundieAwardNotFoundException;
 import com.ninjaone.dundie_awards.exception.InvalidEmployeeReferenceException;
@@ -17,8 +18,7 @@ import com.ninjaone.dundie_awards.repository.DundieAwardRepository;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -29,14 +29,12 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DundieAwardService {
 
-    public static final String AWARD_COUNT_CACHE = "employeeAwardCounts";
-
     // id breaks ties so paging stays stable when timestamps collide
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("awardedAt"), Sort.Order.desc("id"));
 
     private final DundieAwardRepository dundieAwardRepository;
     private final EmployeeRepository employeeRepository;
-    private final ActivityService activityService;
+    private final ApplicationEventPublisher events;
 
     public PageResponse<DundieAwardResponse> getAwards(int page, int size) {
         log.debug("Fetching dundie awards page={} size={}", page, size);
@@ -59,21 +57,13 @@ public class DundieAwardService {
     public PageResponse<LeaderboardEntry> getLeaderboard(int page, int size) {
         log.debug("Fetching award leaderboard page={} size={}", page, size);
         PageResponse<LeaderboardEntry> leaderboard =
-                PageResponse.from(dundieAwardRepository.findLeaderboard(PageRequest.of(page, size)));
+                PageResponse.from(employeeRepository.findLeaderboard(PageRequest.of(page, size)));
         log.debug("Fetched {} of {} leaderboard entries",
                 leaderboard.content().size(), leaderboard.totalElements());
         return leaderboard;
     }
 
-    @Cacheable(cacheNames = AWARD_COUNT_CACHE, key = "#employeeId")
-    public long countAwards(Long employeeId) {
-        long count = dundieAwardRepository.countByRecipientId(employeeId);
-        log.debug("Counted {} dundie awards for employeeId={}", count, employeeId);
-        return count;
-    }
-
     @Transactional
-    @CacheEvict(cacheNames = AWARD_COUNT_CACHE, key = "#request.recipientId()")
     public DundieAwardResponse giveAward(DundieAwardRequest request) {
         if (request.recipientId().equals(request.giverId())) {
             log.warn("Rejecting self award employeeId={}", request.giverId());
@@ -85,9 +75,12 @@ public class DundieAwardService {
 
         DundieAward award = dundieAwardRepository.save(
                 new DundieAward(recipient, giver, organization, LocalDateTime.now()));
+        // same transaction as the insert, so the counter can never disagree with the rows.
+        // the in-memory recipient is now stale, which is fine: nothing below reads its count
+        employeeRepository.incrementAwardCount(recipient.getId());
 
-        activityService.record("dundie_award.given recipientId=" + recipient.getId()
-                + " giverId=" + giver.getId());
+        events.publishEvent(ActivityRecorded.of("dundie_award.given recipientId=" + recipient.getId()
+                + " giverId=" + giver.getId()));
         log.info("Gave dundie award id={} recipientId={} giverId={} organizationId={}",
                 award.getId(), recipient.getId(), giver.getId(), organization.getId());
         return DundieAwardResponse.from(award);

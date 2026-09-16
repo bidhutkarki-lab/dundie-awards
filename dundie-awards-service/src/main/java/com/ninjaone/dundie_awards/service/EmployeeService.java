@@ -3,6 +3,7 @@ package com.ninjaone.dundie_awards.service;
 import com.ninjaone.dundie_awards.dto.EmployeeRequest;
 import com.ninjaone.dundie_awards.dto.EmployeeResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.exception.EmployeeNotFoundException;
 import com.ninjaone.dundie_awards.exception.InvalidOrganizationReferenceException;
 import com.ninjaone.dundie_awards.model.Employee;
@@ -12,6 +13,7 @@ import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -27,15 +29,14 @@ public class EmployeeService {
 
     private final EmployeeRepository employeeRepository;
     private final OrganizationRepository organizationRepository;
-    private final DundieAwardService dundieAwardService;
-    private final ActivityService activityService;
+    private final ApplicationEventPublisher events;
 
     public PageResponse<EmployeeResponse> getEmployees(int page, int size, String search, Long organizationId) {
         log.debug("Fetching employees page={} size={} search='{}' organizationId={}",
                 page, size, search, organizationId);
         PageResponse<EmployeeResponse> employees = PageResponse.from(
                 employeeRepository.search(search, organizationId, PageRequest.of(page, size, BY_ID))
-                        .map(this::toResponse));
+                        .map(EmployeeResponse::from));
         log.debug("Fetched {} of {} employees", employees.content().size(), employees.totalElements());
         return employees;
     }
@@ -51,7 +52,7 @@ public class EmployeeService {
         Organization organization = findOrganization(request.organizationId());
         Employee employee = new Employee(request.firstName(), request.lastName(), organization);
         EmployeeResponse saved = toResponse(employeeRepository.save(employee));
-        activityService.record("employee.created id=" + saved.id());
+        events.publishEvent(ActivityRecorded.of("employee.created id=" + saved.id()));
         log.info("Created employee id={} organizationId={}", saved.id(), request.organizationId());
         return saved;
     }
@@ -64,7 +65,7 @@ public class EmployeeService {
         employee.setLastName(request.lastName());
         employee.setOrganization(organization);
         EmployeeResponse saved = toResponse(employeeRepository.save(employee));
-        activityService.record("employee.updated id=" + id);
+        events.publishEvent(ActivityRecorded.of("employee.updated id=" + id));
         log.info("Updated employee id={} organizationId={}", id, request.organizationId());
         return saved;
     }
@@ -74,12 +75,12 @@ public class EmployeeService {
         Employee employee = findEmployee(id);
         employee.setDeletedAt(LocalDateTime.now());
         employeeRepository.save(employee);
-        activityService.record("employee.deleted id=" + id);
+        events.publishEvent(ActivityRecorded.of("employee.deleted id=" + id));
         log.info("Soft deleted employee id={}", id);
     }
 
     private EmployeeResponse toResponse(Employee employee) {
-        return EmployeeResponse.from(employee, dundieAwardService.countAwards(employee.getId()));
+        return EmployeeResponse.from(employee);
     }
 
     private Employee findEmployee(Long id) {

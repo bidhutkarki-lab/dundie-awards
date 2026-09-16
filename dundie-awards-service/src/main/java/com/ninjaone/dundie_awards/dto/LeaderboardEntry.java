@@ -4,5 +4,5 @@ public record LeaderboardEntry(
         long recipientId,
         String recipientName,
         String organizationName,
-        long awardCount) {
+        int awardCount) {
 }

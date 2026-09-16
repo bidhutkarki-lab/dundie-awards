@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.LocalDateTime;
 import java.util.List;
 
+import com.ninjaone.dundie_awards.SynchronousActivityConfiguration;
 import com.ninjaone.dundie_awards.TestcontainersConfiguration;
 import com.ninjaone.dundie_awards.dto.DundieAwardRequest;
 import com.ninjaone.dundie_awards.model.Activity;
@@ -25,7 +26,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -34,7 +34,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, SynchronousActivityConfiguration.class})
 class DundieAwardControllerIntegrationTest {
 
     @Autowired
@@ -55,9 +55,6 @@ class DundieAwardControllerIntegrationTest {
     @Autowired
     private ActivityRepository activityRepository;
 
-    @Autowired
-    private CacheManager cacheManager;
-
     private Organization organization;
     private Employee recipient;
     private Employee giver;
@@ -68,7 +65,6 @@ class DundieAwardControllerIntegrationTest {
         activityRepository.deleteAll();
         employeeRepository.deleteAll();
         organizationRepository.deleteAll();
-        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
         organization = organizationRepository.save(new Organization("Dunder Mifflin"));
         recipient = employeeRepository.save(new Employee("Michael", "Scott", organization));
         giver = employeeRepository.save(new Employee("Dwight", "Schrute", organization));
@@ -114,7 +110,7 @@ class DundieAwardControllerIntegrationTest {
     }
 
     @Test
-    void awardCountCacheIsInvalidatedWhenANewAwardIsGiven() throws Exception {
+    void employeeAwardCountReflectsANewlyGivenAward() throws Exception {
         mockMvc.perform(get("/employees/{id}", recipient.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.dundieAwards").value(0));
@@ -220,12 +216,13 @@ class DundieAwardControllerIntegrationTest {
     @Test
     void leaderboardRanksRecipientsByAwardCount() throws Exception {
         Employee third = employeeRepository.save(new Employee("Creed", "Bratton", organization));
-        // recipient: 3 awards, giver: 1, third: none
+        // awarded through the API so award_count is maintained: recipient 3, giver 1, third none
         for (int i = 0; i < 3; i++) {
-            dundieAwardRepository.save(
-                    new DundieAward(recipient, giver, organization, LocalDateTime.now()));
+            mockMvc.perform(postAward(new DundieAwardRequest(recipient.getId(), giver.getId())))
+                    .andExpect(status().isOk());
         }
-        dundieAwardRepository.save(new DundieAward(giver, third, organization, LocalDateTime.now()));
+        mockMvc.perform(postAward(new DundieAwardRequest(giver.getId(), third.getId())))
+                .andExpect(status().isOk());
 
         mockMvc.perform(get("/dundie-awards/leaderboard"))
                 .andExpect(status().isOk())
@@ -241,8 +238,13 @@ class DundieAwardControllerIntegrationTest {
 
     @Test
     void leaderboardExcludesSoftDeletedRecipients() throws Exception {
-        dundieAwardRepository.save(
-                new DundieAward(recipient, giver, organization, LocalDateTime.now()));
+        mockMvc.perform(postAward(new DundieAwardRequest(recipient.getId(), giver.getId())))
+                .andExpect(status().isOk());
+        // ranked before the soft delete, so an empty result proves the filter rather than a zero counter
+        mockMvc.perform(get("/dundie-awards/leaderboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)));
+
         recipient.setDeletedAt(LocalDateTime.now());
         employeeRepository.save(recipient);
 
@@ -274,7 +276,7 @@ class DundieAwardControllerIntegrationTest {
     }
 
     private long employeeAwardCount(long employeeId) {
-        return dundieAwardRepository.countByRecipientId(employeeId);
+        return employeeRepository.findById(employeeId).orElseThrow().getAwardCount();
     }
 
     private List<String> activityEvents() {

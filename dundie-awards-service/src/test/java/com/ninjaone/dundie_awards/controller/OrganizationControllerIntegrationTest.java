@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.List;
 
+import com.ninjaone.dundie_awards.SynchronousActivityConfiguration;
 import com.ninjaone.dundie_awards.TestcontainersConfiguration;
 import com.ninjaone.dundie_awards.dto.OrganizationRequest;
 import com.ninjaone.dundie_awards.model.Activity;
@@ -32,7 +33,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, SynchronousActivityConfiguration.class})
 class OrganizationControllerIntegrationTest {
 
     @Autowired

@@ -3,6 +3,7 @@ package com.ninjaone.dundie_awards.service;
 import com.ninjaone.dundie_awards.dto.OrganizationRequest;
 import com.ninjaone.dundie_awards.dto.OrganizationResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.exception.OrganizationHasEmployeesException;
 import com.ninjaone.dundie_awards.exception.OrganizationNotFoundException;
 import com.ninjaone.dundie_awards.model.Organization;
@@ -11,6 +12,7 @@ import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -26,7 +28,7 @@ public class OrganizationService {
 
     private final OrganizationRepository organizationRepository;
     private final EmployeeRepository employeeRepository;
-    private final ActivityService activityService;
+    private final ApplicationEventPublisher events;
 
     public PageResponse<OrganizationResponse> getOrganizations(int page, int size, String search) {
         log.debug("Fetching organizations page={} size={} search='{}'", page, size, search);
@@ -48,7 +50,7 @@ public class OrganizationService {
         log.debug("Creating organization name={}", request.name());
         OrganizationResponse saved =
                 OrganizationResponse.from(organizationRepository.save(new Organization(request.name())));
-        activityService.record("organization.created id=" + saved.id());
+        events.publishEvent(ActivityRecorded.of("organization.created id=" + saved.id()));
         log.info("Created organization id={}", saved.id());
         return saved;
     }
@@ -58,7 +60,7 @@ public class OrganizationService {
         Organization organization = findOrganization(id);
         organization.setName(request.name());
         OrganizationResponse saved = OrganizationResponse.from(organizationRepository.save(organization));
-        activityService.record("organization.updated id=" + id);
+        events.publishEvent(ActivityRecorded.of("organization.updated id=" + id));
         log.info("Updated organization id={}", id);
         return saved;
     }
@@ -73,7 +75,7 @@ public class OrganizationService {
         // soft deleted so award history and former employees keep a valid organization
         organization.setDeletedAt(LocalDateTime.now());
         organizationRepository.save(organization);
-        activityService.record("organization.deleted id=" + id);
+        events.publishEvent(ActivityRecorded.of("organization.deleted id=" + id));
         log.info("Soft deleted organization id={}", id);
     }
 
