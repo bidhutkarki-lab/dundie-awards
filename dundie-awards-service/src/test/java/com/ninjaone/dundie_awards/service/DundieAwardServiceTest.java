@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
@@ -15,6 +16,7 @@ import java.util.Optional;
 import com.ninjaone.dundie_awards.dto.DundieAwardRequest;
 import com.ninjaone.dundie_awards.dto.DundieAwardResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.exception.CrossOrganizationAwardException;
 import com.ninjaone.dundie_awards.exception.DundieAwardNotFoundException;
 import com.ninjaone.dundie_awards.exception.InvalidEmployeeReferenceException;
@@ -31,6 +33,7 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -54,7 +57,7 @@ class DundieAwardServiceTest {
     private EmployeeRepository employeeRepository;
 
     @Mock
-    private ActivityService activityService;
+    private ApplicationEventPublisher events;
 
     @InjectMocks
     private DundieAwardService dundieAwardService;
@@ -64,6 +67,9 @@ class DundieAwardServiceTest {
 
     @Captor
     private ArgumentCaptor<Pageable> pageableCaptor;
+
+    @Captor
+    private ArgumentCaptor<ActivityRecorded> activityCaptor;
 
     @Test
     void getAwardsRequestsNewestFirstOrder() {
@@ -123,10 +129,25 @@ class DundieAwardServiceTest {
     }
 
     @Test
-    void countAwardsReturnsRecipientAwardTotal() {
-        when(dundieAwardRepository.countByRecipientId(RECIPIENT_ID)).thenReturn(4L);
+    void giveAwardIncrementsRecipientCounterNotGiver() {
+        Employee recipient = employee(RECIPIENT_ID, "Michael", "Scott");
+        Employee giver = employee(GIVER_ID, "Dwight", "Schrute");
+        when(employeeRepository.findByIdAndDeletedAtIsNull(RECIPIENT_ID)).thenReturn(Optional.of(recipient));
+        when(employeeRepository.findByIdAndDeletedAtIsNull(GIVER_ID)).thenReturn(Optional.of(giver));
+        when(dundieAwardRepository.save(any(DundieAward.class))).thenReturn(award());
 
-        assertThat(dundieAwardService.countAwards(RECIPIENT_ID)).isEqualTo(4);
+        dundieAwardService.giveAward(new DundieAwardRequest(RECIPIENT_ID, GIVER_ID));
+
+        verify(employeeRepository).incrementAwardCount(RECIPIENT_ID);
+        verify(employeeRepository, never()).incrementAwardCount(GIVER_ID);
+    }
+
+    @Test
+    void giveAwardLeavesCounterAloneWhenAwardIsRejected() {
+        assertThatThrownBy(() -> dundieAwardService.giveAward(new DundieAwardRequest(RECIPIENT_ID, RECIPIENT_ID)))
+                .isInstanceOf(SelfAwardException.class);
+
+        verify(employeeRepository, never()).incrementAwardCount(any());
     }
 
     @Test
@@ -146,8 +167,7 @@ class DundieAwardServiceTest {
         assertThat(saved.getOrganization()).isSameAs(recipient.getOrganization());
         assertThat(saved.getAwardedAt()).isNotNull();
         assertThat(response.id()).isEqualTo(AWARD_ID);
-        verify(activityService)
-                .record("dundie_award.given recipientId=" + RECIPIENT_ID + " giverId=" + GIVER_ID);
+        assertActivityPublished("dundie_award.given recipientId=" + RECIPIENT_ID + " giverId=" + GIVER_ID);
     }
 
     @Test
@@ -159,7 +179,7 @@ class DundieAwardServiceTest {
                 .hasMessage("Employee not found: " + RECIPIENT_ID);
         verify(dundieAwardRepository, never()).save(any());
         verify(employeeRepository, never()).save(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -173,7 +193,7 @@ class DundieAwardServiceTest {
                 .hasMessage("Employee not found: " + GIVER_ID);
         verify(dundieAwardRepository, never()).save(any());
         verify(employeeRepository, never()).save(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -192,7 +212,7 @@ class DundieAwardServiceTest {
                 .isInstanceOf(CrossOrganizationAwardException.class);
         verify(dundieAwardRepository, never()).save(any());
         verify(employeeRepository, never()).save(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -213,7 +233,7 @@ class DundieAwardServiceTest {
                 .isInstanceOf(SelfAwardException.class);
         verify(dundieAwardRepository, never()).save(any());
         verify(employeeRepository, never()).save(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     private static DundieAward award() {
@@ -225,6 +245,11 @@ class DundieAwardServiceTest {
                 AWARDED_AT);
         ReflectionTestUtils.setField(award, "id", AWARD_ID);
         return award;
+    }
+
+    private void assertActivityPublished(String event) {
+        verify(events).publishEvent(activityCaptor.capture());
+        assertThat(activityCaptor.getValue().event()).isEqualTo(event);
     }
 
     private static Organization organization() {

@@ -40,8 +40,10 @@ separate database setup is needed — the container is created and torn down per
 
 An employee can receive any number of Dundie Awards. Each award is recorded as an immutable
 row — who received it, who gave it, in which organization, and when — so the history is never
-rewritten. An employee's total is derived by counting those rows rather than stored on the
-employee, and the count is cached per employee and invalidated whenever they receive a new award.
+rewritten. The awards table is the source of truth for totals, but each employee also carries an
+`award_count` column incremented in the same transaction as the award insert, so listing employees
+and ranking the leaderboard read a stored number instead of aggregating the ledger. If the counter
+ever drifts, the backfill statement in `V6__add_employee_award_count.sql` rebuilds it from the rows.
 
 An award can only be given between two employees of the **same** organization, and nobody can
 award themselves.

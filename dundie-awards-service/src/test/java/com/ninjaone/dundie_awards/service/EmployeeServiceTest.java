@@ -10,9 +10,11 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -20,6 +22,7 @@ import java.util.stream.Stream;
 import com.ninjaone.dundie_awards.dto.EmployeeRequest;
 import com.ninjaone.dundie_awards.dto.EmployeeResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.exception.EmployeeNotFoundException;
 import com.ninjaone.dundie_awards.exception.InvalidOrganizationReferenceException;
 import com.ninjaone.dundie_awards.model.Employee;
@@ -36,6 +39,7 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -55,7 +59,7 @@ class EmployeeServiceTest {
     private OrganizationRepository organizationRepository;
 
     @Mock
-    private ActivityService activityService;
+    private ApplicationEventPublisher events;
 
     @Mock
     private DundieAwardService dundieAwardService;
@@ -68,6 +72,9 @@ class EmployeeServiceTest {
 
     @Captor
     private ArgumentCaptor<Pageable> pageableCaptor;
+
+    @Captor
+    private ArgumentCaptor<ActivityRecorded> activityCaptor;
 
     @Test
     void getEmployeesRequestsStableIdOrder() {
@@ -106,6 +113,19 @@ class EmployeeServiceTest {
     }
 
     @Test
+    void getEmployeesReadsAwardCountsFromTheEmployeeRows() {
+        when(employeeRepository.search(any(), any(), any(Pageable.class))).thenReturn(new PageImpl<>(
+                List.of(employee(EMPLOYEE_ID, "Michael", "Scott", 3),
+                        employee(2L, "Dwight", "Schrute", 0))));
+
+        PageResponse<EmployeeResponse> response = employeeService.getEmployees(0, 10, "", null);
+
+        assertThat(response.content())
+                .extracting(EmployeeResponse::id, EmployeeResponse::dundieAwards)
+                .containsExactly(tuple(EMPLOYEE_ID, 3L), tuple(2L, 0L));
+    }
+
+    @Test
     void getEmployeesReturnsEmptyPageWhenNoneExist() {
         when(employeeRepository.search(any(), any(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
@@ -120,10 +140,8 @@ class EmployeeServiceTest {
 
     @ParameterizedTest(name = "maps employee with {0}")
     @MethodSource("employeeMappingCases")
-    void getEmployeeMapsEmployeeToResponse(
-            String caseName, Employee stored, long awardCount, EmployeeResponse expected) {
+    void getEmployeeMapsEmployeeToResponse(String caseName, Employee stored, EmployeeResponse expected) {
         when(employeeRepository.findByIdAndDeletedAtIsNull(EMPLOYEE_ID)).thenReturn(Optional.of(stored));
-        when(dundieAwardService.countAwards(EMPLOYEE_ID)).thenReturn(awardCount);
 
         assertThat(employeeService.getEmployee(EMPLOYEE_ID)).isEqualTo(expected);
     }
@@ -143,7 +161,7 @@ class EmployeeServiceTest {
         assertThat(saved.getLastName()).isEqualTo("Scott");
         assertThat(saved.getOrganization()).isSameAs(organization);
         assertThat(response.id()).isEqualTo(EMPLOYEE_ID);
-        verify(activityService).record("employee.created id=" + EMPLOYEE_ID);
+        assertActivityPublished("employee.created id=" + EMPLOYEE_ID);
     }
 
     @Test
@@ -162,7 +180,7 @@ class EmployeeServiceTest {
         assertThat(existing.getOrganization()).isSameAs(newOrganization);
         assertThat(response.lastName()).isEqualTo("Scarn");
         assertThat(response.organizationName()).isEqualTo("Sabre");
-        verify(activityService).record("employee.updated id=" + EMPLOYEE_ID);
+        assertActivityPublished("employee.updated id=" + EMPLOYEE_ID);
     }
 
     @Test
@@ -175,7 +193,7 @@ class EmployeeServiceTest {
         assertThat(existing.getDeletedAt()).isNotNull();
         verify(employeeRepository).save(existing);
         verify(employeeRepository, never()).delete(any());
-        verify(activityService).record("employee.deleted id=" + EMPLOYEE_ID);
+        assertActivityPublished("employee.deleted id=" + EMPLOYEE_ID);
     }
 
     @ParameterizedTest(name = "employee missing: {0}")
@@ -189,7 +207,7 @@ class EmployeeServiceTest {
                 .isInstanceOf(EmployeeNotFoundException.class);
         verify(employeeRepository, never()).save(any());
         verify(employeeRepository, never()).delete(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     @ParameterizedTest(name = "organization missing: {0}")
@@ -200,7 +218,7 @@ class EmployeeServiceTest {
         assertThatThrownBy(() -> operation.accept(employeeService))
                 .isInstanceOf(InvalidOrganizationReferenceException.class);
         verify(employeeRepository, never()).save(any());
-        verify(activityService, never()).record(anyString());
+        verifyNoInteractions(events);
     }
 
     private static Stream<Arguments> employeeMappingCases() {
@@ -213,8 +231,7 @@ class EmployeeServiceTest {
         return Stream.of(
                 Arguments.of(
                         "organization and awards present",
-                        employee(EMPLOYEE_ID, "Michael", "Scott"),
-                        3L,
+                        employee(EMPLOYEE_ID, "Michael", "Scott", 3),
                         EmployeeResponse.builder()
                                 .id(EMPLOYEE_ID)
                                 .firstName("Michael")
@@ -226,7 +243,6 @@ class EmployeeServiceTest {
                 Arguments.of(
                         "no awards yet",
                         employee(EMPLOYEE_ID, "Pam", "Beesly"),
-                        0L,
                         EmployeeResponse.builder()
                                 .id(EMPLOYEE_ID)
                                 .firstName("Pam")
@@ -237,7 +253,6 @@ class EmployeeServiceTest {
                 Arguments.of(
                         "no organization",
                         unassigned,
-                        0L,
                         EmployeeResponse.builder()
                                 .id(EMPLOYEE_ID)
                                 .firstName("Creed")
@@ -262,15 +277,25 @@ class EmployeeServiceTest {
         return operation;
     }
 
+    private void assertActivityPublished(String event) {
+        verify(events).publishEvent(activityCaptor.capture());
+        assertThat(activityCaptor.getValue().event()).isEqualTo(event);
+    }
+
     private static Organization organization() {
         return Organization.builder().id(ORGANIZATION_ID).name("Dunder Mifflin").build();
     }
 
     private static Employee employee(long id, String firstName, String lastName) {
+        return employee(id, firstName, lastName, 0);
+    }
+
+    private static Employee employee(long id, String firstName, String lastName, int awardCount) {
         return Employee.builder()
                 .id(id)
                 .firstName(firstName)
                 .lastName(lastName)
+                .awardCount(awardCount)
                 .organization(organization())
                 .build();
     }

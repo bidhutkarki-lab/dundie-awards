@@ -1,6 +1,7 @@
 package com.ninjaone.dundie_awards.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -11,6 +12,7 @@ import java.util.List;
 
 import com.ninjaone.dundie_awards.dto.ActivityResponse;
 import com.ninjaone.dundie_awards.dto.PageResponse;
+import com.ninjaone.dundie_awards.event.ActivityRecorded;
 import com.ninjaone.dundie_awards.model.Activity;
 import com.ninjaone.dundie_awards.repository.ActivityRepository;
 import org.junit.jupiter.api.Test;
@@ -41,15 +43,24 @@ class ActivityServiceTest {
     private ArgumentCaptor<Pageable> pageableCaptor;
 
     @Test
-    void recordPersistsEventWithTimestamp() {
-        LocalDateTime before = LocalDateTime.now();
+    void listenerPersistsEventWithThePublishedTimestamp() {
+        LocalDateTime publishedAt = LocalDateTime.of(2024, 1, 1, 10, 0);
 
-        activityService.record("employee.created id=1");
+        activityService.onActivityRecorded(new ActivityRecorded(publishedAt, "employee.created id=1"));
 
         verify(activityRepository).save(activityCaptor.capture());
         Activity saved = activityCaptor.getValue();
         assertThat(saved.getEvent()).isEqualTo("employee.created id=1");
-        assertThat(saved.getOccurredAt()).isBetween(before, LocalDateTime.now());
+        // the publish timestamp, not the drain time, or the feed would be ordered by scheduling
+        assertThat(saved.getOccurredAt()).isEqualTo(publishedAt);
+    }
+
+    @Test
+    void listenerSwallowsPersistenceFailuresBecauseTheTransactionHasAlreadyCommitted() {
+        when(activityRepository.save(any(Activity.class))).thenThrow(new RuntimeException("db down"));
+
+        assertThatCode(() -> activityService.onActivityRecorded(ActivityRecorded.of("employee.created id=1")))
+                .doesNotThrowAnyException();
     }
 
     @Test

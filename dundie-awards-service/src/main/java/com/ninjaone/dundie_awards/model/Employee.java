@@ -27,6 +27,10 @@ public class Employee {
     @Column(name = "last_name")
     private String lastName;
 
+    // derived from the dundie_awards rows and incremented with each award; see V6 to rebuild
+    @Column(name = "award_count", nullable = false)
+    private int awardCount;
+
     @ManyToOne
     private Organization organization;
 

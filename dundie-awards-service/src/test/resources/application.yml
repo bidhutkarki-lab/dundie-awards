@@ -1,4 +1,7 @@
 spring:
+  # lets SynchronousActivityConfiguration swap the activity executor for an inline one
+  main:
+    allow-bean-definition-overriding: true
   jpa:
     hibernate:
       ddl-auto: validate

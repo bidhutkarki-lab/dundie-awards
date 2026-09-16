@@ -8,11 +8,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.LocalDateTime;
 import java.util.stream.IntStream;
 
+import com.ninjaone.dundie_awards.SynchronousActivityConfiguration;
 import com.ninjaone.dundie_awards.TestcontainersConfiguration;
 import com.ninjaone.dundie_awards.model.Activity;
 import com.ninjaone.dundie_awards.model.Employee;
 import com.ninjaone.dundie_awards.model.Organization;
 import com.ninjaone.dundie_awards.repository.ActivityRepository;
+import com.ninjaone.dundie_awards.repository.DundieAwardRepository;
 import com.ninjaone.dundie_awards.repository.EmployeeRepository;
 import com.ninjaone.dundie_awards.repository.OrganizationRepository;
 import org.hamcrest.Matchers;
@@ -26,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, SynchronousActivityConfiguration.class})
 class IndexControllerIntegrationTest {
 
     @Autowired
@@ -36,6 +38,9 @@ class IndexControllerIntegrationTest {
     private ActivityRepository activityRepository;
 
     @Autowired
+    private DundieAwardRepository dundieAwardRepository;
+
+    @Autowired
     private EmployeeRepository employeeRepository;
 
     @Autowired
@@ -43,6 +48,7 @@ class IndexControllerIntegrationTest {
 
     @BeforeEach
     void resetData() {
+        dundieAwardRepository.deleteAll();
         activityRepository.deleteAll();
         employeeRepository.deleteAll();
         organizationRepository.deleteAll();
